@@ -113,6 +113,7 @@ namespace Compressor
 
                 if (outputOffset != -1)
                 {
+                    // You don't need sychronization, because you know place where to write.
                     output.Write(res, outputOffset);
                 }
                 else

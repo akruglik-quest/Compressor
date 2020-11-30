@@ -39,7 +39,6 @@ namespace GZipTest
             {
                 si.Arguments += $" {chunk.Number * 1000000}";
             }
-            Console.WriteLine(si.Arguments);
 
             processes[i] = new Process();
             processes[i].StartInfo = si;
