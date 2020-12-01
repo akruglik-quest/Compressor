@@ -79,6 +79,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Consts.cs" />
     <Compile Include="Shared\BaseCompressInfo.cs" />
     <Compile Include="FileBinaryStreams\CompressedBinary.cs" />
     <Compile Include="Shared\ChunkData.cs" />

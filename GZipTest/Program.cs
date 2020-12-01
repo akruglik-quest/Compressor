@@ -10,22 +10,9 @@ namespace GZipTest
 {
     class Program
     {
-        static int simultaniousProcessesCount;
         static Process[] processes;
         static AutoResetEvent[] waitHandles;
         static BaseCompressInfo s_compressInfo;
-
-        static int FindFreeProcessNumber()
-        {
-            for (int i = 0; i < simultaniousProcessesCount; i++)
-            {
-                if (processes[i] == null || processes[i].HasExited)
-                {
-                    return i;
-                }
-            }
-            return -1;
-        }
 
         static void HandleChunkInDedicatedProcess(int i, BaseCompressInfo startData, ChunkData chunk, string logFilename, string locFilename)
         {
@@ -37,7 +24,7 @@ namespace GZipTest
                 $"\"{startData.InputFileName}\" \"{startData.OutputFileName}\" \"{logFilename}\" \"{locFilename}\" {chunk.Number} {chunk.Offset} {chunk.Length}";
             if (startData.Operation == Operation.Decompress)
             {
-                si.Arguments += $" {chunk.Number * 1000000}";
+                si.Arguments += $" {chunk.Number * Consts.ChunkSize}";
             }
 
             processes[i] = new Process();
@@ -47,17 +34,20 @@ namespace GZipTest
             processes[i].Start();
         }
 
-        private static (string logFilename, string locFilename) Initialize()
+        private static void InitializeWaitHandles()
         {
-            simultaniousProcessesCount = Environment.ProcessorCount;
+            var simultaniousProcessesCount = Environment.ProcessorCount;
             processes = new Process[simultaniousProcessesCount];
             waitHandles = new AutoResetEvent[simultaniousProcessesCount];
 
             for (int i = 0; i < simultaniousProcessesCount; i++)
             {
-                waitHandles[i] = new AutoResetEvent(false);
+                waitHandles[i] = new AutoResetEvent(true);
             }
+        }
 
+        private static string CreateAndReturnLaunchDirectory()
+        {
             var productDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Compressor");
             if (!Directory.Exists(productDataFolder))
             {
@@ -65,16 +55,10 @@ namespace GZipTest
             }
             var launchFolder = Path.Combine(productDataFolder, Guid.NewGuid().ToString());
             Directory.CreateDirectory(launchFolder);
-
-            var res = ( logFilename : Path.Combine(launchFolder, "compressor.log"), locFilename : Path.Combine(launchFolder, "compressor.loc") );
-            File.WriteAllText(res.locFilename, "0");
-            return res;
-
+            return launchFolder;
         }
-        static string GetUsingMessage()
-        {
-            return "GZipTest.exe compress/decompress [source filename] [result filename]";
-        }
+
+        static string GetUsingMessage() => "GZipTest.exe compress/decompress [source filename] [result filename]";
 
         static int Main(string[] args)
         {
@@ -82,13 +66,20 @@ namespace GZipTest
             timer.Start();
 
             int result = 0;
-            (string logFilename, string locFilename) helperFiles = ("","");
             var logger = new ConsoleLogger();
+            string launchDirectory = "";
+            string logFilename = "";
             try
             {
                 s_compressInfo = CmdLine.ExtractCmdArguments(args, logger);
+                
+                launchDirectory = CreateAndReturnLaunchDirectory();
+                logFilename = Path.Combine(launchDirectory, "compressor.log");
+                var locFilename = Path.Combine(launchDirectory, "compressor.loc");
+                File.WriteAllText(locFilename, "0");
+                
 
-                helperFiles = Initialize();
+                InitializeWaitHandles();
 
                 using (var offsetter = (s_compressInfo.Operation == Operation.Compress) ?
                     (Offsetter)new NonCompressedOffsetter(s_compressInfo.InputFileName) :
@@ -96,17 +87,14 @@ namespace GZipTest
                 {
                     foreach (ChunkData chunk in offsetter)
                     {
-                        int iFree = FindFreeProcessNumber();
-                        if (iFree == -1)
+                        var iFree = WaitHandle.WaitAny(waitHandles, TimeSpan.FromMinutes(10));
+                        if (iFree == WaitHandle.WaitTimeout)
                         {
-                            iFree = WaitHandle.WaitAny(waitHandles, TimeSpan.FromMinutes(10));
-                            if (iFree == WaitHandle.WaitTimeout)
-                            {
-                                throw new CompressException($"Can't find free process to execute during 10 minutes. See {helperFiles.logFilename} for more information.");
-                            }
+                            throw new CompressException($"Can't find free process during 10 minutes.");
                         }
-                        HandleChunkInDedicatedProcess(iFree, s_compressInfo, chunk, helperFiles.logFilename, helperFiles.locFilename);
+                        HandleChunkInDedicatedProcess(iFree, s_compressInfo, chunk, logFilename, locFilename);
                     }
+                    WaitHandle.WaitAll(waitHandles, TimeSpan.FromMinutes(10));
                 }
             }
             catch (Exception ex)
@@ -122,17 +110,18 @@ namespace GZipTest
                     foreach (var p in processes.Where(p => p?.HasExited == false))
                     {
                         p.WaitForExit((int)TimeSpan.FromMinutes(10).TotalMilliseconds);
+                        logger.Error($"Some processes was hung.");
+                        result = 1;
                     }
                 }
-
-                if (File.Exists(helperFiles.logFilename)) //used only for errors from generated processes.
+                if (File.Exists(logFilename)) //used only for errors from generated processes.
                 {
-                    logger.Error($"Some errors was occuried during processing. See {helperFiles.logFilename} for more information.");
+                    logger.Error($"Some errors was occuried during processing. See {logFilename} for more information.");
                     result = 1;
                 }
-                if (File.Exists(helperFiles.locFilename))
+                if (result == 0)
                 {
-                    File.Delete(helperFiles.locFilename);
+                    Directory.Delete(launchDirectory, true);
                 }
             }
 
