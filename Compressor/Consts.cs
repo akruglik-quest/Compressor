@@ -8,6 +8,6 @@ namespace Compressor
 {
     public static class Consts
     {
-        public const int ChunkSize = 1000000; //1MB
+        public const int ChunkSize = 20* 1000000; //1MB
     }
 }

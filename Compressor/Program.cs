@@ -77,10 +77,10 @@ namespace Compressor
                 chunk.Number = Int64.Parse(args[5]);
                 chunk.Offset = Int64.Parse(args[6]);
                 chunk.Length = Int32.Parse(args[7]);
-                if (args.Length >8)
+               /* if (args.Length >8)
                 {
                     outputOffset = Int64.Parse(args[8]);
-                }
+                }*/
             }
             catch (Exception ex)
             {
